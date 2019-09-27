@@ -145,6 +145,7 @@ class DagFileProcessor(AbstractDagFileProcessor, LoggingMixin):
             log.info("Started process (PID=%s) to work on %s",
                      os.getpid(), file_path)
             scheduler_job = SchedulerJob(dag_ids=dag_id_white_list, log=log)
+            #这里开始处理dag文件和task
             result = scheduler_job.process_file(file_path, pickle_dags)
             result_channel.send(result)
             end_time = time.time()
@@ -328,9 +329,8 @@ class SchedulerJob(BaseJob):
             dag_id=None,
             dag_ids=None,
             subdir=settings.DAGS_FOLDER,
-            num_runs=conf.getint('scheduler', 'num_runs', fallback=-1),
-            processor_poll_interval=conf.getfloat(
-                'scheduler', 'processor_poll_interval', fallback=1),
+            num_runs=-1,
+            processor_poll_interval=1.0,
             run_duration=None,
             do_pickle=False,
             log=None,
@@ -591,6 +591,8 @@ class SchedulerJob(BaseJob):
         for a DAG based on scheduling interval.
         Returns DagRun if one is scheduled. Otherwise returns None.
         """
+
+        # dag的定时任务频率
         if dag.schedule_interval and conf.getboolean('scheduler', 'USE_JOB_SCHEDULE'):
             active_runs = DagRun.find(
                 dag_id=dag.dag_id,
@@ -608,6 +610,7 @@ class SchedulerJob(BaseJob):
                         dr.start_date < timezone.utcnow() - dag.dagrun_timeout):
                     dr.state = State.FAILED
                     dr.end_date = timezone.utcnow()
+                    # 输出 回调日志
                     dag.handle_callback(dr, success=False, reason='dagrun_timeout',
                                         session=session)
                     timedout_runs += 1
@@ -616,6 +619,7 @@ class SchedulerJob(BaseJob):
                 return
 
             # this query should be replaced by find dagrun
+            # 查询dagrun中执行时间最大的，返回一个值
             qry = (
                 session.query(func.max(DagRun.execution_date))
                 .filter_by(dag_id=dag.dag_id)
@@ -655,6 +659,7 @@ class SchedulerJob(BaseJob):
                 # First run
                 task_start_dates = [t.start_date for t in dag.tasks]
                 if task_start_dates:
+                    # 根据传入时间计算出下次执行时间
                     next_run_date = dag.normalize_schedule(min(task_start_dates))
                     self.log.debug(
                         "Next run date based on tasks %s",
@@ -664,8 +669,10 @@ class SchedulerJob(BaseJob):
                 next_run_date = dag.following_schedule(last_scheduled_run)
 
             # make sure backfills are also considered
+            # 获取最新执行时间
             last_run = dag.get_last_dagrun(session=session)
             if last_run and next_run_date:
+                # 修正操作，如果下次执行时间比最近执行时间小，那说明已经执行过了，一直循环到最近执行时间的下一次时间
                 while next_run_date <= last_run.execution_date:
                     next_run_date = dag.following_schedule(next_run_date)
 
@@ -724,6 +731,7 @@ class SchedulerJob(BaseJob):
         """
 
         # update the state of the previously active dag runs
+        # 获取需要执行的dagrun
         dag_runs = DagRun.find(dag_id=dag.dag_id, state=State.RUNNING, session=session)
         active_dag_runs = []
         for run in dag_runs:
@@ -747,7 +755,10 @@ class SchedulerJob(BaseJob):
             # todo: run.dag is transient but needs to be set
             run.dag = dag
             # todo: preferably the integrity check happens at dag collection time
+            # 执行对删除任务的操作
             run.verify_integrity(session=session)
+
+            # 对dagrun的状态做判断，更新
             run.update_state(session=session)
             if run.state == State.RUNNING:
                 make_transient(run)
@@ -756,6 +767,7 @@ class SchedulerJob(BaseJob):
         for run in active_dag_runs:
             self.log.debug("Examining active DAG run: %s", run)
             # this needs a fresh session sometimes tis get detached
+            # 返回dag下的task任务
             tis = run.get_task_instances(state=(State.NONE,
                                                 State.UP_FOR_RETRY,
                                                 State.UP_FOR_RESCHEDULE))
@@ -768,7 +780,6 @@ class SchedulerJob(BaseJob):
 
                 # fixme: ti.task is transient but needs to be set
                 ti.task = task
-
                 if ti.are_dependencies_met(
                         dep_context=DepContext(flag_upstream_failed=True),
                         session=session):
@@ -864,6 +875,7 @@ class SchedulerJob(BaseJob):
     @provide_session
     def _find_executable_task_instances(self, simple_dag_bag, states, session=None):
         """
+        查找就绪的task
         Finds TIs that are ready for execution with respect to pool limits,
         dag concurrency, executor state, and priority.
 
@@ -882,6 +894,7 @@ class SchedulerJob(BaseJob):
         # Get all task instances associated with scheduled
         # DagRuns which are not backfilled, in the given states,
         # and the dag is not paused
+        # 获取task 信息，此处需要在dag_ids中的task。
         TI = models.TaskInstance
         DR = models.DagRun
         DM = models.DagModel
@@ -906,8 +919,10 @@ class SchedulerJob(BaseJob):
                 or_(TI.state == None, TI.state.in_(states))  # noqa: E711 pylint: disable=singleton-comparison
             )
         else:
+            # 此处传入的是schedule 状态，即预处理中，准备开始。。但是这个状态值在库里面是什么时候写的呢？？
             ti_query = ti_query.filter(TI.state.in_(states))
 
+        # 返回查询结果
         task_instances_to_examine = ti_query.all()
 
         if len(task_instances_to_examine) == 0:
@@ -923,19 +938,25 @@ class SchedulerJob(BaseJob):
         )
 
         # Get the pool settings
+        # 查询slot_pool表，获取队列值
         pools = {p.pool: p for p in session.query(models.Pool).all()}
 
+        # 把查询到的TIs加入一个pool中。有pool和TI的映射
         pool_to_task_instances = defaultdict(list)
         for task_instance in task_instances_to_examine:
             pool_to_task_instances[task_instance.pool].append(task_instance)
 
+        # 准备把task状态改为running或者queue
         states_to_count_as_running = [State.RUNNING, State.QUEUED]
         # dag_id to # of running tasks and (dag_id, task_id) to # of running tasks.
+
+        # 查询TI表，生成dagid和taskid的映射关系
         dag_concurrency_map, task_concurrency_map = self.__get_concurrency_maps(
             states=states_to_count_as_running, session=session)
 
         # Go through each pool, and queue up a task for execution if there are
         # any open slots in the pool.
+        # 遍历pools中的TIs
         for pool, task_instances in pool_to_task_instances.items():
             pool_name = pool
             if pool not in pools:
@@ -945,6 +966,7 @@ class SchedulerJob(BaseJob):
                 )
                 continue
             else:
+                # 返回当前session使用的slots数 ： running/queued状态的task
                 open_slots = pools[pool].open_slots(session=session)
 
             num_ready = len(task_instances)
@@ -954,6 +976,7 @@ class SchedulerJob(BaseJob):
                 pool, open_slots, num_ready
             )
 
+            # TIs按权重值 + execute date 进行排序
             priority_sorted_task_instances = sorted(
                 task_instances, key=lambda ti: (-ti.priority_weight, ti.execution_date))
 
@@ -1156,6 +1179,7 @@ class SchedulerJob(BaseJob):
                                 states,
                                 session=None):
         """
+        把需要执行的task进行实例化，并加入执行队列中
         Attempts to execute TaskInstances that should be executed by the scheduler.
 
         There are three steps:
@@ -1171,6 +1195,8 @@ class SchedulerJob(BaseJob):
         :type states: tuple[airflow.utils.state.State]
         :return: Number of task instance with state changed.
         """
+
+        # 根据dag查找对应的TIs，这里的数据是在manager中的dag processor进程处理入库的
         executable_tis = self._find_executable_task_instances(simple_dag_bag, states,
                                                               session=session)
 
@@ -1179,6 +1205,7 @@ class SchedulerJob(BaseJob):
                 self._change_state_for_executable_task_instances(items,
                                                                  states,
                                                                  session=session)
+            # 调用executor 的send ，发送封装好的task 到queue
             self._enqueue_task_instances_with_queued_state(
                 simple_dag_bag,
                 simple_tis_with_state_changed)
@@ -1255,6 +1282,7 @@ class SchedulerJob(BaseJob):
 
             self.log.info("Processing %s", dag.dag_id)
 
+            #核心逻辑，创建dag run的逻辑，插入db中
             dag_run = self.create_dag_run(dag)
             if dag_run:
                 expected_start_date = dag.following_schedule(dag_run.execution_date)
@@ -1264,6 +1292,7 @@ class SchedulerJob(BaseJob):
                         'dagrun.schedule_delay.{dag_id}'.format(dag_id=dag.dag_id),
                         schedule_delay)
                 self.log.info("Created %s", dag_run)
+            # 核心逻辑，处理task
             self._process_task_instances(dag, tis_out)
             self.manage_slas(dag)
 
@@ -1321,23 +1350,28 @@ class SchedulerJob(BaseJob):
                 (executors.LocalExecutor, executors.SequentialExecutor):
             pickle_dags = True
 
+        #初始化默认参数都为1
         self.log.info("Running execute loop for %s seconds", self.run_duration)
         self.log.info("Processing each file at most %s times", self.num_runs)
 
+        # 查找dag文件夹内的dags
         # Build up a list of Python files that could contain DAGs
         self.log.info("Searching for files in %s", self.subdir)
         known_file_paths = list_py_file_paths(self.subdir)
         self.log.info("There are %s files in %s", len(known_file_paths), self.subdir)
 
+        # 这个方法生成的类对象，是处理dag文件及task的，里面有插入db的操作，初始化为schedule状态
         def processor_factory(file_path):
             return DagFileProcessor(file_path,
                                     pickle_dags,
                                     self.dag_ids)
 
+        # 不用sqlite库
         # When using sqlite, we do not use async_mode
         # so the scheduler job and DAG parser don't access the DB at the same time.
         async_mode = not self.using_sqlite
 
+        # 初始化 dag processor agent。处理dag生成task
         processor_timeout_seconds = conf.getint('core', 'dagbag_import_timeout')
         processor_timeout = timedelta(seconds=processor_timeout_seconds)
         self.processor_agent = DagFileProcessorAgent(self.subdir,
@@ -1348,6 +1382,7 @@ class SchedulerJob(BaseJob):
                                                      async_mode)
 
         try:
+            # 核心处理代码在此
             self._execute_helper()
         except Exception:
             self.log.exception("Exception when executing execute_helper")
@@ -1357,6 +1392,11 @@ class SchedulerJob(BaseJob):
 
     def _execute_helper(self):
         """
+        核心调度流程
+        （1）通过DagFileProcessorAgent收集DAG解析结果
+        （2）找到可执行的task，并放入broker队列：修改数据库中的task状态，放入任务执行器的队列中。
+        （3）执行器心跳检测：异步检测任务队列，同步task执行状态。
+
         The actual scheduler loop. The main steps in the loop are:
             #. Harvest DAG parsing results through DagFileProcessorAgent
             #. Find and queue executable tasks
@@ -1372,12 +1412,17 @@ class SchedulerJob(BaseJob):
 
         :rtype: None
         """
+        # 初始化一些worker相关的参数。线上时就是启动celery executor
         self.executor.start()
-
+        # 重置孤立的任务。把当前存在dagrun的任务，但是没有下发到executor的任务，重置为none状态，重新下发入队列
         self.log.info("Resetting orphaned tasks for active dag runs")
         self.reset_state_for_orphaned_tasks()
 
         # Start after resetting orphaned tasks to avoid stressing out DB.
+        # 1. 这个地方也比较重要，dag file agent 处理，进入start方法查看，见下一个代码分析：http://kms.sys.wanmei.net/pages/viewpage.action?pageId=44803485
+        # 启动了父子进程进行dag文件的更新监听
+        # 处理dag 和task入库等操作
+        # 这里是核心代码，处理dag，生成task，最终得到的dag封装包通过进程间通信，最终归到agent进程
         self.processor_agent.start()
 
         execute_start_time = timezone.utcnow()
@@ -1386,11 +1431,13 @@ class SchedulerJob(BaseJob):
         last_self_heartbeat_time = timezone.utcnow()
 
         # For the execute duration, parse and schedule DAGs
+        # run_duration = -1 表示连续运行，既while true
         while (timezone.utcnow() - execute_start_time).total_seconds() < \
                 self.run_duration or self.run_duration < 0:
             self.log.debug("Starting Loop...")
             loop_start_time = time.time()
 
+            # 线上不运行sqlite
             if self.using_sqlite:
                 self.processor_agent.heartbeat()
                 # For the sqlite case w/ 1 thread, wait until the processor
@@ -1399,16 +1446,20 @@ class SchedulerJob(BaseJob):
                     "Waiting for processors to finish since we're using sqlite")
                 self.processor_agent.wait_until_finished()
 
+            # agent 从dag file manager 子进程中获取到的simple dags
             self.log.debug("Harvesting DAG parsing results")
             simple_dags = self.processor_agent.harvest_simple_dags()
             self.log.debug("Harvested {} SimpleDAGs".format(len(simple_dags)))
 
             # Send tasks for execution if available
+            # 封装dag处理，建立dag_Id -> dag的映射
             simple_dag_bag = SimpleDagBag(simple_dags)
             if len(simple_dags) > 0:
                 try:
+                    # 这里为啥要再封装一次？？？
                     simple_dag_bag = SimpleDagBag(simple_dags)
 
+                    #下面两个方法是对异常状态的处理，这个后续再分析
                     # Handle cases where a DAG run state is set (perhaps manually) to
                     # a non-running state. Handle task instances that belong to
                     # DAG runs in those states
@@ -1428,6 +1479,7 @@ class SchedulerJob(BaseJob):
                                                                State.UP_FOR_RESCHEDULE],
                                                               State.NONE)
 
+                    # 这里主要是把task封装到队列中，并且封成一个commond 形式的
                     self._execute_task_instances(simple_dag_bag,
                                                  (State.SCHEDULED,))
                 except Exception as e:
@@ -1437,8 +1489,12 @@ class SchedulerJob(BaseJob):
 
             # Call heartbeats
             self.log.debug("Heartbeating the executor")
+            # 这里调用基类 executor ，触发task执行，在executor实现类中，进行处理。
+            # 当前用的celery，就是用celeryexecutor中的triggerTask方法
+            # executor会把task封装为commond 发送到queue中
             self.executor.heartbeat()
 
+            # 处理失败
             self._change_state_for_tasks_failed_to_execute()
 
             # Process events from the executor
@@ -1523,6 +1579,7 @@ class SchedulerJob(BaseJob):
         simple_dags = []
 
         try:
+            # 解析处理dag文件为bag对象
             dagbag = models.DagBag(file_path, include_examples=False)
         except Exception:
             self.log.exception("Failed at reloading the DAG file %s", file_path)
@@ -1537,6 +1594,7 @@ class SchedulerJob(BaseJob):
             return []
 
         # Save individual DAGs in the ORM and update DagModel.last_scheduled_time
+        # 存入dag信息到db
         for dag in dagbag.dags.values():
             dag.sync_to_db()
 
@@ -1567,6 +1625,7 @@ class SchedulerJob(BaseJob):
         # returns true as described in https://bugs.python.org/issue23582 )
         ti_keys_to_schedule = []
 
+        # 处理生成dagrun实例
         self._process_dags(dagbag, dags, ti_keys_to_schedule)
 
         for ti_key in ti_keys_to_schedule:

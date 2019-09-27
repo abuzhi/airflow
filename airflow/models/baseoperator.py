@@ -16,19 +16,16 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""
-Base operator for all operators.
-"""
+
 from abc import ABCMeta, abstractmethod
+from cached_property import cached_property
 import copy
 import functools
 import logging
 import sys
 import warnings
 from datetime import timedelta, datetime
-from typing import Callable, Dict, Iterable, Optional, Set, Any
-
-from cached_property import cached_property
+from typing import Iterable, Optional, Dict, Callable, Set
 
 import jinja2
 import six
@@ -224,14 +221,14 @@ class BaseOperator(LoggingMixin):
     # Defines which files extensions to look for in the templated fields
     template_ext = []  # type: Iterable[str]
     # Defines the color in the UI
-    ui_color = '#fff'  # type str
-    ui_fgcolor = '#000'  # type str
+    ui_color = '#fff'
+    ui_fgcolor = '#000'
 
     # base list which includes all the attrs that don't need deep copy.
     _base_operator_shallow_copy_attrs = ('user_defined_macros',
                                          'user_defined_filters',
                                          'params',
-                                         '_log',)  # type: Iterable[str]
+                                         '_log',)
 
     # each operator should override this class attr for shallow copy attrs.
     shallow_copy_attrs = ()  # type: Iterable[str]
@@ -428,8 +425,8 @@ class BaseOperator(LoggingMixin):
 
     def __hash__(self):
         hash_components = [type(self)]
-        for component in self._comps:
-            val = getattr(self, component, None)
+        for c in self._comps:
+            val = getattr(self, c, None)
             try:
                 hash(val)
                 hash_components.append(val)
@@ -523,7 +520,6 @@ class BaseOperator(LoggingMixin):
 
     @property
     def dag_id(self):
-        """Returns dag id if it has one or an adhoc + owner"""
         if self.has_dag():
             return self.dag.dag_id
         else:
@@ -556,15 +552,6 @@ class BaseOperator(LoggingMixin):
 
     @property
     def priority_weight_total(self):
-        """
-        Total priority weight for the task. It might include all upstream or downstream tasks.
-        depending on the weight rule.
-
-          - WeightRule.ABSOLUTE - only own weight
-          - WeightRule.DOWNSTREAM - adds priority weight of all downstream tasks
-          - WeightRule.UPSTREAM - adds priority weight of all upstream tasks
-
-        """
         if self.weight_rule == WeightRule.ABSOLUTE:
             return self.priority_weight
         elif self.weight_rule == WeightRule.DOWNSTREAM:
@@ -581,12 +568,10 @@ class BaseOperator(LoggingMixin):
 
     @cached_property
     def operator_extra_link_dict(self):
-        """Returns dictionary of all extra links for the operator"""
         return {link.name: link for link in self.operator_extra_links}
 
     @cached_property
     def global_operator_extra_link_dict(self):
-        """Returns dictionary of all global extra links"""
         from airflow.plugins_manager import global_operator_extra_links
         return {link.name: link for link in global_operator_extra_links}
 
@@ -634,9 +619,7 @@ class BaseOperator(LoggingMixin):
         result = cls.__new__(cls)
         memo[id(self)] = result
 
-        # noinspection PyProtectedMember
-        shallow_copy = cls.shallow_copy_attrs + \
-            cls._base_operator_shallow_copy_attrs
+        shallow_copy = cls.shallow_copy_attrs + cls._base_operator_shallow_copy_attrs
 
         for k, v in list(self.__dict__.items()):
             if k not in shallow_copy:
@@ -655,76 +638,51 @@ class BaseOperator(LoggingMixin):
         self.__dict__ = state
         self._log = logging.getLogger("airflow.task.operators")
 
-    def render_template_fields(self, context, jinja_env=None):
-        # type: (Dict, Optional[jinja2.Environment]) -> None
+    def render_template_from_field(self, attr, content, context, jinja_env):
         """
-        Template all attributes listed in template_fields. Note this operation is irreversible.
-
-        :param context: Dict with values to apply on content
-        :type context: dict
-        :param jinja_env: Jinja environment
-        :type jinja_env: jinja2.Environment
+        Renders a template from a field. If the field is a string, it will
+        simply render the string and return the result. If it is a collection or
+        nested set of collections, it will traverse the structure and render
+        all elements in it. If the field has another type, it will return it as it is.
         """
-
-        if not jinja_env:
-            jinja_env = self.get_template_env()
-
-        for attr_name in self.template_fields:
-            content = getattr(self, attr_name)
-            if content:
-                rendered_content = self.render_template(content, context, jinja_env)
-                setattr(self, attr_name, rendered_content)
-
-    def render_template(self, content, context, jinja_env=None):
-        # type: (Any, Dict, Optional[jinja2.Environment]) -> Any
-        """
-        Render a templated string. The content can be a collection holding multiple templated strings and will
-        be templated recursively.
-
-        :param content: Content to template. Only strings can be templated (may be inside collection).
-        :type content: Any
-        :param context: Dict with values to apply on templated content
-        :type context: dict
-        :param jinja_env: Jinja environment. Can be provided to avoid re-creating Jinja environments during
-            recursion.
-        :type jinja_env: jinja2.Environment
-        :return: Templated content
-        """
-
-        if not jinja_env:
-            jinja_env = self.get_template_env()
-
+        rt = self.render_template
         if isinstance(content, six.string_types):
-            if any(content.endswith(ext) for ext in self.template_ext):
-                # Content contains a filepath
-                return jinja_env.get_template(content).render(**context)
-            else:
-                return jinja_env.from_string(content).render(**context)
-
-        if isinstance(content, tuple):
+            result = jinja_env.from_string(content).render(**context)
+        elif isinstance(content, tuple):
             if type(content) is not tuple:
                 # Special case for named tuples
-                return content.__class__(
-                    *(self.render_template(element, context, jinja_env) for element in content)
-                )
+                result = content.__class__(*(rt(attr, e, context) for e in content))
             else:
-                return tuple(self.render_template(element, context, jinja_env) for element in content)
-
+                result = tuple(rt(attr, e, context) for e in content)
         elif isinstance(content, list):
-            return [self.render_template(element, context, jinja_env) for element in content]
-
+            result = [rt(attr, e, context) for e in content]
         elif isinstance(content, dict):
-            return {key: self.render_template(value, context, jinja_env) for key, value in content.items()}
-
-        elif isinstance(content, set):
-            return {self.render_template(element, context, jinja_env) for element in content}
-
+            result = {
+                k: rt("{}[{}]".format(attr, k), v, context)
+                for k, v in list(content.items())}
         else:
-            return content
+            result = content
+        return result
 
-    def get_template_env(self):  # type: () -> jinja2.Environment
-        """Fetch a Jinja template environment from the DAG or instantiate empty environment if no DAG."""
-        return self.dag.get_template_env() if self.has_dag() else jinja2.Environment(cache_size=0)
+    def render_template(self, attr, content, context):
+        """
+        Renders a template either from a file or directly in a field, and returns
+        the rendered result.
+        """
+        jinja_env = self.get_template_env()
+
+        exts = self.__class__.template_ext
+        if (
+                isinstance(content, six.string_types) and
+                any([content.endswith(ext) for ext in exts])):
+            return jinja_env.get_template(content).render(**context)
+        else:
+            return self.render_template_from_field(attr, content, context, jinja_env)
+
+    def get_template_env(self):
+        return self.dag.get_template_env() \
+            if hasattr(self, 'dag') \
+            else jinja2.Environment(cache_size=0)
 
     def prepare_template(self):
         """
@@ -737,27 +695,26 @@ class BaseOperator(LoggingMixin):
 
     def resolve_template_files(self):
         # Getting the content of files for template_field / template_ext
-        if self.template_ext:
-            for attr in self.template_fields:
-                content = getattr(self, attr, None)
-                if content is None:
-                    continue
-                elif isinstance(content, six.string_types) and \
-                        any([content.endswith(ext) for ext in self.template_ext]):
-                    env = self.get_template_env()
-                    try:
-                        setattr(self, attr, env.loader.get_source(env, content)[0])
-                    except Exception as e:
-                        self.log.exception(e)
-                elif isinstance(content, list):
-                    env = self.dag.get_template_env()
-                    for i in range(len(content)):
-                        if isinstance(content[i], six.string_types) and \
-                                any([content[i].endswith(ext) for ext in self.template_ext]):
-                            try:
-                                content[i] = env.loader.get_source(env, content[i])[0]
-                            except Exception as e:
-                                self.log.exception(e)
+        for attr in self.template_fields:
+            content = getattr(self, attr)
+            if content is None:
+                continue
+            elif isinstance(content, six.string_types) and \
+                    any([content.endswith(ext) for ext in self.template_ext]):
+                env = self.get_template_env()
+                try:
+                    setattr(self, attr, env.loader.get_source(env, content)[0])
+                except Exception as e:
+                    self.log.exception(e)
+            elif isinstance(content, list):
+                env = self.dag.get_template_env()
+                for i in range(len(content)):
+                    if isinstance(content[i], six.string_types) and \
+                            any([content[i].endswith(ext) for ext in self.template_ext]):
+                        try:
+                            content[i] = env.loader.get_source(env, content[i])[0]
+                        except Exception as e:
+                            self.log.exception(e)
         self.prepare_template()
 
     @property
@@ -767,7 +724,6 @@ class BaseOperator(LoggingMixin):
 
     @property
     def upstream_task_ids(self):
-        """@property: list of ids of tasks directly upstream"""
         return self._upstream_task_ids
 
     @property
@@ -777,7 +733,6 @@ class BaseOperator(LoggingMixin):
 
     @property
     def downstream_task_ids(self):
-        """@property: list of ids of tasks directly downstream"""
         return self._downstream_task_ids
 
     @provide_session
@@ -872,15 +827,14 @@ class BaseOperator(LoggingMixin):
         start_date = start_date or self.start_date
         end_date = end_date or self.end_date or timezone.utcnow()
 
-        for execution_date in self.dag.date_range(start_date, end_date=end_date):
-            TaskInstance(self, execution_date).run(
+        for dt in self.dag.date_range(start_date, end_date=end_date):
+            TaskInstance(self, dt).run(
                 mark_success=mark_success,
                 ignore_depends_on_past=(
-                    execution_date == start_date and ignore_first_depends_on_past),
+                    dt == start_date and ignore_first_depends_on_past),
                 ignore_ti_state=ignore_ti_state)
 
     def dry_run(self):
-        """Performs dry run for the operator - just render template fields."""
         self.log.info('Dry run')
         for attr in self.template_fields:
             content = getattr(self, attr)
@@ -914,35 +868,31 @@ class BaseOperator(LoggingMixin):
 
     @property
     def task_type(self):
-        """@property: type of the task"""
         return self.__class__.__name__
 
     def add_only_new(self, item_set, item):
-        """Adds only new items to item set"""
         if item in item_set:
             self.log.warning(
-                'Dependency %s, %s already registered', self, item)
+                'Dependency {self}, {item} already registered'
+                ''.format(self=self, item=item))
         else:
             item_set.add(item)
 
     def _set_relatives(self, task_or_task_list, upstream=False):
-        """Sets relatives for the task."""
         try:
             task_list = list(task_or_task_list)
         except TypeError:
             task_list = [task_or_task_list]
 
-        for task in task_list:
-            if not isinstance(task, BaseOperator):
+        for t in task_list:
+            if not isinstance(t, BaseOperator):
                 raise AirflowException(
                     "Relationships can only be set between "
-                    "Operators; received {}".format(task.__class__.__name__))
+                    "Operators; received {}".format(t.__class__.__name__))
 
         # relationships can only be set if the tasks share a single DAG. Tasks
         # without a DAG are assigned to that DAG.
-        dags = {
-            task._dag.dag_id: task._dag  # pylint: disable=protected-access
-            for task in [self] + task_list if task.has_dag()}
+        dags = {t._dag.dag_id: t._dag for t in [self] + task_list if t.has_dag()}
 
         if len(dags) > 1:
             raise AirflowException(
@@ -1015,7 +965,7 @@ class BaseOperator(LoggingMixin):
 
     @cached_property
     def extra_links(self):
-        """@property: extra links for the task. """
+        # type: () -> Iterable[str]
         return list(set(self.operator_extra_link_dict.keys())
                     .union(self.global_operator_extra_link_dict.keys()))
 
@@ -1034,8 +984,6 @@ class BaseOperator(LoggingMixin):
             return self.operator_extra_link_dict[link_name].get_link(self, dttm)
         elif link_name in self.global_operator_extra_link_dict:
             return self.global_operator_extra_link_dict[link_name].get_link(self, dttm)
-        else:
-            return None
 
 
 class BaseOperatorLink:

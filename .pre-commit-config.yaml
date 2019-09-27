@@ -24,13 +24,13 @@ repos:
     hooks:
       - id: build
         name: Check if image build is needed
-        entry: ./scripts/ci/local_ci_build.sh
+        entry: ./scripts/ci/ci_build.sh
         language: system
         always_run: true
         pass_filenames: false
       - id: check-apache-license
         name: Check if licences are OK for Apache
-        entry: "./scripts/ci/pre_commit_check_license.sh"
+        entry: ./scripts/ci/ci_check_license.sh
         language: system
         files: ^.*LICENSE.*$|^.*LICENCE.*$
         pass_filenames: false
@@ -92,20 +92,10 @@ repos:
           - license-templates/LICENSE.txt
           - --fuzzy-match-generates-todo
       - id: insert-license
-        name: Add licence for all shell files
+        name: Add licence for shell files
         exclude: ^\.github/.*$"|^airflow/_vendor/.*$
         types: [shell]
         files: ^breeze$|^breeze-complete$|\.sh$
-        args:
-          - --comment-style
-          - "|#|"
-          - --license-filepath
-          - license-templates/LICENSE.txt
-          - --fuzzy-match-generates-todo
-      - id: insert-license
-        name: Add licence for all python files
-        exclude: ^\.github/.*$"|^airflow/_vendor/.*$
-        types: [python]
         args:
           - --comment-style
           - "|#|"
@@ -123,7 +113,7 @@ repos:
           - license-templates/LICENSE.txt
           - --fuzzy-match-generates-todo
       - id: insert-license
-        name: Add licence for all yaml files
+        name: Add licence for yaml files
         exclude: ^\.github/.*$"|^airflow/_vendor/.*$
         types: [yaml]
         args:
@@ -163,11 +153,6 @@ repos:
       - id: mixed-line-ending
       - id: check-executables-have-shebangs
       - id: check-xml
-  - repo: https://github.com/pre-commit/pygrep-hooks
-    rev: v1.4.1
-    hooks:
-      - id: rst-backticks
-      - id: python-no-log-warn
   - repo: local
     hooks:
       - id: yamllint
@@ -182,27 +167,23 @@ repos:
         language: docker_image
         entry: koalaman/shellcheck:stable -x -a
         types: [shell]
-        files: ^breeze$|^breeze-complete$|\.sh$|^hooks/build$|^hooks/push$
+        files: ^breeze$|^breeze-complete$|\.sh$
         exclude: ^airflow/_vendor/.*$
       - id: lint-dockerfile
         name: Lint dockerfile
         language: system
-        entry: "./scripts/ci/pre_commit_lint_dockerfile.sh"
+        entry: ./scripts/ci/ci_lint_dockerfile.sh
         files: ^Dockerfile.*$
-        pass_filenames: true
       - id: mypy
         name: Run mypy
         language: system
-        entry: "./scripts/ci/pre_commit_mypy.sh"
+        entry: ./scripts/ci/ci_mypy.sh
         files: \.py$
-        exclude: ^airflow/_vendor/.*$
-        pass_filenames: true
       - id: flake8
         name: Run flake8
         language: system
-        entry: "./scripts/ci/pre_commit_flake8.sh"
+        entry: ./scripts/ci/ci_flake8.sh
         files: \.py$
-        pass_filenames: true
       - id: python2-fastcheck
         language: pygrep
         name: Find common Python 3 vs. 2.7 compatibility problems

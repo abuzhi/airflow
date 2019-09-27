@@ -22,7 +22,7 @@
 Documentation that goes along with the Airflow tutorial located
 [here](https://airflow.apache.org/tutorial.html)
 """
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 import airflow
 from airflow import DAG
@@ -42,7 +42,7 @@ default_args = {
     # 'queue': 'bash_queue',
     # 'pool': 'backfill',
     # 'priority_weight': 10,
-    # 'end_date': datetime(2016, 1, 1),
+    'end_date': datetime(2016, 1, 1),
     # 'wait_for_downstream': False,
     # 'dag': dag,
     # 'sla': timedelta(hours=2),

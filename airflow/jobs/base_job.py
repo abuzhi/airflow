@@ -79,11 +79,11 @@ class BaseJob(Base, LoggingMixin):
 
     def __init__(
             self,
-            executor=None,
+            executor=executors.get_default_executor(),
             heartrate=None,
             *args, **kwargs):
         self.hostname = get_hostname()
-        self.executor = executor or executors.get_default_executor()
+        self.executor = executor
         self.executor_class = executor.__class__.__name__
         self.start_date = timezone.utcnow()
         self.latest_heartbeat = timezone.utcnow()

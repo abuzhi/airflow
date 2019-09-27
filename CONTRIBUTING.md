@@ -229,7 +229,7 @@ Before running the pre-commit hooks you must first build the docker images as de
 
 Sometimes your image is outdated (when dependencies change) and needs to be rebuilt because some
 dependencies have been changed. In such case the docker build pre-commit will inform
-you that you should build the image.
+you that you should rebuild the image.
 
 ## Prerequisites for pre-commit hooks
 
@@ -290,9 +290,6 @@ run pre-commit hooks manually as needed.
 
 *You can skip one or more of the checks by specifying comma-separated list of checks to skip in SKIP variable:*
 `SKIP=flake8,mypy pre-commit run --all-files`
-
-*You can run only one mypy checks manually on a single file (or list of files) by running:*
-`pre-commit run mypy --files PATH_TO_FILE`. Example: `pre-commit run mypy --files airflow/operators/bash_operator.py`
 
 ## Skipping pre-commit hooks
 

@@ -527,8 +527,12 @@ class DagFileProcessorAgent(LoggingMixin):
         """
         Launch DagFileProcessorManager processor and start DAG parsing loop in manager.
         """
+        # 这里生成的是父子进程来做的，子进程为dag的监控进程
+        # agent 端 以manager为父进程，父进程为airflow scheduler -- DagFileProcessorManager
+        # 此处用的python 多进程Pipe通信机制，默认全双工
         self._parent_signal_conn, child_signal_conn = multiprocessing.Pipe()
         self._process = multiprocessing.Process(
+            # 此处生成manager进程
             target=type(self)._run_processor_manager,
             args=(
                 self._dag_directory,
@@ -602,6 +606,8 @@ class DagFileProcessorAgent(LoggingMixin):
         reload_module(airflow.settings)
         airflow.settings.initialize()
         del os.environ['CONFIG_PROCESSOR_MANAGER_LOGGER']
+
+        # 启动manager 进程
         processor_manager = DagFileProcessorManager(dag_directory,
                                                     file_paths,
                                                     max_runs,
@@ -818,10 +824,12 @@ class DagFileProcessorManager(LoggingMixin):
             poll_time = None
             self.log.debug("Starting DagFileProcessorManager in sync mode")
 
+        # 监控agent 对 dag file的操作
         while True:
             loop_start_time = time.time()
-
+            # 这里poll（time），就是循环时间。其实就是manager扫描的频率时间，下面代码中有处理逻辑，其实是1s
             if self._signal_conn.poll(poll_time):
+                # 接受来自agent的消息
                 agent_signal = self._signal_conn.recv()
                 self.log.debug("Recived %s singal from DagFileProcessorAgent", agent_signal)
                 if agent_signal == DagParsingSignal.TERMINATE_MANAGER:
@@ -839,9 +847,16 @@ class DagFileProcessorManager(LoggingMixin):
                 # SQLite DB which isn't a good practice
                 continue
 
+            # 这里刷新dag file。初始化监听处理线程；有个参数 dag_dir_list_interval 设定，默认为5min。更新dag 文件路径参数
+            # 更新dag 文件路径与processor的映射
             self._refresh_dag_dir()
 
+            # 检测更新dag files 。此处是manager的心跳检测
+            # 核心代码：启动处理dag文件的进程，生成task，入db等操作
+            # 子线程处理的结果发给父线程
             simple_dags = self.heartbeat()
+
+            # 这里应该是manager 处理得到的dags 发送给agent进程
             for simple_dag in simple_dags:
                 self._signal_conn.send(simple_dag)
 
@@ -869,6 +884,7 @@ class DagFileProcessorManager(LoggingMixin):
                                               max_runs_reached,
                                               all_files_processed,
                                               )
+            # 发送给agent
             self._signal_conn.send(dag_parsing_stat)
 
             if max_runs_reached:
@@ -895,6 +911,7 @@ class DagFileProcessorManager(LoggingMixin):
             self._file_paths = list_py_file_paths(self._dag_directory)
             self.last_dag_dir_refresh_time = timezone.utcnow()
             self.log.info("There are %s files in %s", len(self._file_paths), self._dag_directory)
+            # 这里会更新dag文件
             self.set_file_paths(self._file_paths)
 
             try:
@@ -1110,6 +1127,7 @@ class DagFileProcessorManager(LoggingMixin):
             have finished since the last time this was called
         :rtype: list[airflow.utils.dag_processing.SimpleDag]
         """
+        # 关闭hang掉或者超时的处理进程
         self._kill_timed_out_processors()
 
         finished_processors = {}
@@ -1152,6 +1170,7 @@ class DagFileProcessorManager(LoggingMixin):
 
     def heartbeat(self):
         """
+        真正刷新dag文件的方法
         This should be periodically called by the manager loop. This method will
         kick off new processes to process DAG definition files and read the
         results from the finished processors.
@@ -1203,8 +1222,8 @@ class DagFileProcessorManager(LoggingMixin):
         while (self._parallelism - len(self._processors) > 0 and
                len(self._file_path_queue) > 0):
             file_path = self._file_path_queue.pop(0)
+            #这里是真正加载dag文件到db，解析task到TI表的操作，用的是DagFileProcessor
             processor = self._processor_factory(file_path)
-
             processor.start()
             self.log.debug(
                 "Started a process (PID: %s) to generate tasks for %s",

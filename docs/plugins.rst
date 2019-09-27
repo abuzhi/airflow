@@ -257,12 +257,11 @@ It is possible to load plugins via `setuptools entrypoint <https://packaging.pyt
 your plugin using an entrypoint in your package. If the package is installed, airflow
 will automatically load the registered plugins from the entrypoint list.
 
-.. note::
-    Neither the entrypoint name (eg, ``my_plugin``) nor the name of the
-    plugin class will contribute towards the module and class name of the plugin
-    itself. The structure is determined by
-    ``airflow.plugins_manager.AirflowPlugin.name`` and the class name of the plugin
-    component with the pattern ``airflow.{component}.{name}.{component_class_name}``.
+_Note_: Neither the entrypoint name (eg, `my_plugin`) nor the name of the
+plugin class will contribute towards the module and class name of the plugin
+itself. The structure is determined by
+`airflow.plugins_manager.AirflowPlugin.name` and the class name of the plugin
+component with the pattern `airflow.{component}.{name}.{component_class_name}`.
 
 .. code-block:: python
 
@@ -299,5 +298,5 @@ will automatically load the registered plugins from the entrypoint list.
 
 
 This will create a hook, and an operator accessible at:
- - ``airflow.hooks.my_namespace.MyHook``
- - ``airflow.operators.my_namespace.MyOperator``
+ - `airflow.hooks.my_namespace.MyHook`
+ - `airflow.operators.my_namespace.MyOperator`

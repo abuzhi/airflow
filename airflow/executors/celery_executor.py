@@ -209,6 +209,7 @@ class CeleryExecutor(BaseExecutor):
             num_processes = min(len(task_tuples_to_send), self._sync_parallelism)
 
             send_pool = Pool(processes=num_processes)
+            # 开始执行task任务，开启多进程进行
             key_and_async_results = send_pool.map(
                 send_task_to_executor,
                 task_tuples_to_send,

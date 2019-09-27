@@ -292,7 +292,7 @@ It is as easy as copy&pasting this line into your code:
 
 Once you hit the line you will be dropped into interactive ipdb  debugger where you have colors
 and auto-completion to guide your debugging. This works from the console where you started your program.
-Note that in case of ``nosetest`` you need to provide ``--nocapture`` flag to avoid nosetests
+Note that in case of ``nosetest`` you need to provide `--nocapture` flag to avoid nosetests
 capturing the stdout of your process.
 
 Airflow directory structure inside Docker
@@ -366,7 +366,7 @@ You can check if your docker is clean by running ``docker images --all`` and ``d
 should return an empty list of images and containers respectively.
 
 If you are on Mac OS and you end up with not enough disk space for Docker you should increase disk space
-available for Docker. See `Prerequsites <#prerequisites>`_.
+available for Docker. See `Prerequsites <#prerequisites>`.
 
 Troubleshooting
 ---------------
@@ -741,9 +741,6 @@ These are the current flags of the `./breeze <./breeze>`_ script
     -y, --assume-yes
             Assume 'yes' answer to all questions.
 
-    -n, --assume-no
-            Assume 'no' answer to all questions.
-
     -C, --toggle-suppress-cheatsheet
             Toggles on/off cheatsheet displayed before starting bash shell
 
@@ -758,13 +755,13 @@ These are the current flags of the `./breeze <./breeze>`_ script
     -H, --dockerhub-repo
             DockerHub repository used to pull, push, build images. Default: airflow.
 
-    -r, --force-build-images
-            Forces building of the local docker images. The images are rebuilt
+    -r, --force-rebuild-images
+            Forces rebuilding of the local docker images. The images are rebuilt
             automatically for the first time or when changes are detected in
             package-related files, but you can force it using this flag.
 
-    -R, --force-build-images-clean
-            Force build images without cache. This will remove the pulled or build images
+    -R, --force-rebuild-images-clean
+            Force rebuild images without cache. This will remove the pulled or build images
             and start building images from scratch. This might take a long time.
 
     -p, --force-pull-images
@@ -893,7 +890,7 @@ There are three images that we currently manage:
   the checklicence image.
 
 We also use a very small `<Dockerfile-context>`_ dockerfile in order to fix file permissions
-for an obscure permission problem with Docker caching but it is not stored in ``apache/airflow`` registry.
+for an obscure permission problem with Docker caching but it is not stored in `apache/airflow` registry.
 
 Before you run tests or enter environment or run local static checks, the necessary local images should be
 pulled and built from DockerHub. This happens automatically for the test environment but you need to
@@ -908,7 +905,7 @@ that might take more time (but it is highly optimised to only rebuild what's nee
 
 In most cases re-building an image requires connectivity to network (for example to download new
 dependencies). In case you work offline and do not want to rebuild the images when needed - you might set
-``FORCE_ANSWER_TO_QUESTIONS`` variable to ``no`` as described in the
+``ASSUME_NO_TO_ALL_QUESTIONS`` variable to ``true`` as described in the
 `Default behaviour for user interaction <#default-behaviour-for-user-interaction>`_ chapter.
 
 See `Troubleshooting section <#troubleshooting>`_ for steps you can make to clean the environment.
@@ -922,23 +919,23 @@ For automation scripts, you can export one of the three variables to control the
 
 .. code-block::
 
-  export FORCE_ANSWER_TO_QUESTIONS="yes"
+  export ASSUME_YES_TO_ALL_QUESTIONS="true"
 
-If ``FORCE_ANSWER_TO_QUESTIONS`` is set to ``yes``, the images will automatically rebuild when needed.
+If ``ASSUME_YES_TO_ALL_QUESTIONS` is set to `true`, the images will automatically rebuild when needed.
 Images are deleted without asking.
 
 .. code-block::
 
-  export FORCE_ANSWER_TO_QUESTIONS="no"
+  export ASSUME_NO_TO_ALL_QUESTIONS="true"
 
-If ``FORCE_ANSWER_TO_QUESTIONS`` is set to ``no``, the old images are used even if re-building is needed.
+If ``ASSUME_NO_TO_ALL_QUESTIONS`` is set to ``true``, the old images are used even if re-building is needed.
 This is useful when you work offline. Deleting images is aborted.
 
 .. code-block::
 
-  export FORCE_ANSWER_TO_QUESTIONS="quit"
+  export ASSUME_QUIT_TO_ALL_QUESTIONS="true"
 
-If ``FORCE_ANSWER_TO_QUESTIONS`` is set to ``quit``, the whole script is aborted. Deleting images is aborted.
+If ``ASSUME_QUIT_TO_ALL_QUESTIONS`` is set to ``true``, the whole script is aborted. Deleting images is aborted.
 
 If more than one variable is set, YES takes precedence over NO which take precedence over QUIT.
 

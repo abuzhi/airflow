@@ -20,7 +20,6 @@
 import unittest
 import logging
 
-from airflow.exceptions import AirflowException
 try:
     from airflow.operators.docker_operator import DockerOperator
     from airflow.hooks.docker_hook import DockerHook
@@ -28,6 +27,7 @@ try:
 except ImportError:
     pass
 
+from airflow.exceptions import AirflowException
 from tests.compat import mock
 
 
@@ -124,7 +124,7 @@ class DockerOperatorTestCase(unittest.TestCase):
 
         client_class_mock.return_value = client_mock
 
-        originalRaiseExceptions = logging.raiseExceptions  # pylint: disable=invalid-name
+        originalRaiseExceptions = logging.raiseExceptions
         logging.raiseExceptions = True
 
         operator = DockerOperator(image='ubuntu', owner='unittest', task_id='unittest')

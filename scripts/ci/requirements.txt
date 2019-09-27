@@ -46,7 +46,6 @@ google-auth>=1.0.0,<2.0.0dev
 google-auth-httplib2
 gunicorn
 hdfs
-hive-thrift-py
 ipython
 jaydebeapi
 jinja2<2.9.0

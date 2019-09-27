@@ -384,6 +384,7 @@ class DagBag(BaseDagBag, LoggingMixin):
                                            include_examples=include_examples):
             try:
                 ts = timezone.utcnow()
+                # 解析dag文件的方法
                 found_dags = self.process_file(
                     filepath, only_if_updated=only_if_updated,
                     safe_mode=safe_mode)
